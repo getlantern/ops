@@ -6,6 +6,7 @@
 package ops
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/getlantern/context"
@@ -43,6 +44,9 @@ type Op interface {
 	// called multiple times, the latest error will be reported as the failure.
 	// Returns the original error for convenient chaining.
 	Error(err error) error
+
+	// Errorf is like Error but constructs an error from the given message and format args
+	Errorf(msg string, args ...interface{}) error
 }
 
 type op struct {
@@ -108,4 +112,8 @@ func (o *op) Error(err error) error {
 		o.failure = err
 	}
 	return err
+}
+
+func (o *op) Errorf(msg string, args ...interface{}) error {
+	return o.Error(fmt.Errorf(msg, args...))
 }
