@@ -1,6 +1,7 @@
 package ops_test
 
 import (
+	gerrors "errors"
 	"sync"
 	"testing"
 
@@ -57,6 +58,7 @@ func doTestFailure(t *testing.T, cancel bool) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	op.Go(func() {
+		op.FailIf(gerrors.New("This error should be ignored"))
 		op.FailIf(errors.New("I failed").With("errorcontext", 5))
 		wg.Done()
 	})

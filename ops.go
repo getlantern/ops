@@ -7,7 +7,6 @@ package ops
 
 import (
 	"sync"
-	"sync/atomic"
 
 	"github.com/getlantern/context"
 )
@@ -53,9 +52,10 @@ type Op interface {
 }
 
 type op struct {
-	ctx      context.Context
-	canceled bool
-	failure  atomic.Value
+	ctx       context.Context
+	canceled  bool
+	failure   error
+	failureMx sync.RWMutex
 }
 
 // RegisterReporter registers the given reporter.
@@ -101,11 +101,11 @@ func (o *op) End() {
 	reportersMutex.RUnlock()
 
 	if len(reportersCopy) > 0 {
-		var failure error
-		_failure := o.failure.Load()
-		ctx := o.ctx.AsMap(_failure, true)
-		if _failure != nil {
-			failure = _failure.(error)
+		o.failureMx.RLock()
+		failure := o.failure
+		o.failureMx.RUnlock()
+		ctx := o.ctx.AsMap(failure, true)
+		if failure != nil {
 			_, errorSet := ctx["error"]
 			if !errorSet {
 				ctx["error"] = failure.Error()
@@ -148,7 +148,9 @@ func AsMap(obj interface{}, includeGlobals bool) context.Map {
 
 func (o *op) FailIf(err error) error {
 	if err != nil {
-		o.failure.Store(err)
+		o.failureMx.Lock()
+		o.failure = err
+		o.failureMx.Unlock()
 	}
 	return err
 }
