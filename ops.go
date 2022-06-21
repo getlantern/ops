@@ -7,6 +7,8 @@ package ops
 
 import (
 	gocontext "context"
+	"crypto/rand"
+	"fmt"
 	"sync"
 
 	"github.com/getlantern/context"
@@ -21,11 +23,13 @@ const (
 )
 
 var (
-	cm             = context.NewManager()
-	reporters      []Reporter
-	reportersMutex sync.RWMutex
-	tracer         trace.Tracer
-	tracerMx       sync.RWMutex
+	cm                = context.NewManager()
+	reporters         []Reporter
+	reportersMutex    sync.RWMutex
+	tracer            trace.Tracer
+	tracerMx          sync.RWMutex
+	fullySampledOps   = make(map[string]bool, 0)
+	fullySampledOpsMx sync.RWMutex
 )
 
 // Reporter is a function that reports the success or failure of an Op. If
@@ -63,6 +67,7 @@ type Op interface {
 }
 
 type op struct {
+	name      string
 	ctx       context.Context
 	span      trace.Span
 	canceled  bool
@@ -90,18 +95,25 @@ func getTracer() trace.Tracer {
 	return tracer
 }
 
+// SetFullySampled sets an op as fully sampled for OpenTelemetry tracing.
+func SetFullySampled(op string, fullySampled bool) {
+	fullySampledOpsMx.Lock()
+	defer fullySampledOpsMx.Unlock()
+	fullySampledOps[op] = fullySampled
+}
+
 // Begin marks the beginning of a new Op.
 func Begin(name string) Op {
 	return addOpenTelemetry(
 		name,
-		&op{ctx: cm.Enter().Put("op", name).PutIfAbsent("root_op", name)},
+		&op{name: name, ctx: cm.Enter().Put("op", name).PutIfAbsent("root_op", name)},
 	)
 }
 
 func (o *op) Begin(name string) Op {
 	return addOpenTelemetry(
 		name,
-		&op{ctx: o.ctx.Enter().Put("op", name).PutIfAbsent("root_op", name)},
+		&op{name: name, ctx: o.ctx.Enter().Put("op", name).PutIfAbsent("root_op", name)},
 	)
 }
 
@@ -110,12 +122,42 @@ func addOpenTelemetry(name string, o *op) Op {
 	if t != nil {
 		var parentCtx gocontext.Context
 		_parentCtx, hasParentCtx := cm.Get(_goctx)
+
 		if hasParentCtx {
 			parentCtx, _ = _parentCtx.(gocontext.Context)
 		} else {
 			parentCtx = gocontext.Background()
 		}
-		ctx, span := tracer.Start(parentCtx, name)
+
+		ctx := parentCtx
+		fullySampledOpsMx.RLock()
+		defer fullySampledOpsMx.RUnlock()
+		if false && fullySampledOps[o.name] {
+			// Force this span to be sampled
+
+			// Note, we have to set a trace ID and span ID to force FlagsSampled, see
+			// https://github.com/open-telemetry/opentelemetry-go/discussions/2651
+
+			var traceID [16]byte
+			var spanID [8]byte
+			parentSpan := trace.SpanFromContext(parentCtx)
+			if parentSpan != nil {
+				// use TraceID from parent span
+				fmt.Printf("Using trace id from parent span: %v\n", parentSpan.SpanContext().SpanID())
+				traceID = parentSpan.SpanContext().TraceID()
+			} else {
+				// new TraceID
+				rand.Read(traceID[:])
+			}
+			rand.Read(spanID[:])
+			spanCtx := trace.NewSpanContext(trace.SpanContextConfig{
+				TraceID:    traceID,
+				SpanID:     spanID,
+				TraceFlags: trace.FlagsSampled,
+			})
+			ctx = trace.ContextWithSpanContext(parentCtx, spanCtx)
+		}
+		ctx, span := tracer.Start(ctx, name)
 		o.span = span
 		o.ctx.Put(_goctx, ctx)
 	}
