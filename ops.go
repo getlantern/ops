@@ -7,7 +7,10 @@ package ops
 
 import (
 	gocontext "context"
+	"fmt"
+	"reflect"
 	"sync"
+	"time"
 
 	"github.com/getlantern/context"
 
@@ -167,6 +170,7 @@ func (o *op) End() {
 
 		if o.span != nil {
 			for key, _value := range ctx {
+				fmt.Printf("%v = %v\n", key, _value)
 				var value attribute.Value
 				switch v := _value.(type) {
 				case bool:
@@ -179,12 +183,16 @@ func (o *op) End() {
 					value = attribute.Int64Value(int64(v))
 				case int64:
 					value = attribute.Int64Value(int64(v))
+				case time.Duration:
+					value = attribute.Int64Value((int64(v)))
 				case float32:
 					value = attribute.Float64Value(float64(v))
 				case float64:
 					value = attribute.Float64Value(float64(v))
 				case string:
 					value = attribute.StringValue(v)
+				default:
+					fmt.Printf("Unrecognized context variable %v of type %v\n", key, reflect.TypeOf(_value))
 				}
 				if value.Type() != attribute.INVALID {
 					o.span.SetAttributes(attribute.KeyValue{
