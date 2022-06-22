@@ -8,6 +8,7 @@ package ops
 import (
 	gocontext "context"
 	"sync"
+	"time"
 
 	"github.com/getlantern/context"
 
@@ -179,6 +180,8 @@ func (o *op) End() {
 					value = attribute.Int64Value(int64(v))
 				case int64:
 					value = attribute.Int64Value(int64(v))
+				case time.Duration:
+					value = attribute.Float64Value(float64(v.Milliseconds()))
 				case float32:
 					value = attribute.Float64Value(float64(v))
 				case float64:
