@@ -7,6 +7,8 @@ package ops
 
 import (
 	gocontext "context"
+	"crypto/rand"
+	"fmt"
 	"sync"
 	"time"
 
@@ -61,6 +63,10 @@ type Op interface {
 	// called multiple times, the latest error will be reported as the failure.
 	// Returns the original error for convenient chaining.
 	FailIf(err error) error
+
+	// TraceID returns the hex encoded trace ID for the current Op if and only if OpenTelemetry
+	// is enabled.
+	TraceID() string
 }
 
 type op struct {
@@ -95,6 +101,7 @@ func getTracer() trace.Tracer {
 func Begin(name string) Op {
 	return addOpenTelemetry(
 		name,
+		"",
 		&op{ctx: cm.Enter().Put("op", name).PutIfAbsent("root_op", name)},
 	)
 }
@@ -102,11 +109,29 @@ func Begin(name string) Op {
 func (o *op) Begin(name string) Op {
 	return addOpenTelemetry(
 		name,
+		"",
 		&op{ctx: o.ctx.Enter().Put("op", name).PutIfAbsent("root_op", name)},
 	)
 }
 
-func addOpenTelemetry(name string, o *op) Op {
+// Resume begins a new op within the scope of an existing trace
+func Resume(name, hexTraceID string) Op {
+	return addOpenTelemetry(
+		name,
+		hexTraceID,
+		&op{ctx: cm.Enter().Put("op", name).PutIfAbsent("root_op", name)},
+	)
+}
+
+func (o *op) Resume(name, hexTraceID string) Op {
+	return addOpenTelemetry(
+		name,
+		hexTraceID,
+		&op{ctx: o.ctx.Enter().Put("op", name).PutIfAbsent("root_op", name)},
+	)
+}
+
+func addOpenTelemetry(name, hexTraceID string, o *op) Op {
 	t := getTracer()
 	if t != nil {
 		var parentCtx gocontext.Context
@@ -114,13 +139,44 @@ func addOpenTelemetry(name string, o *op) Op {
 		if hasParentCtx {
 			parentCtx, _ = _parentCtx.(gocontext.Context)
 		} else {
-			parentCtx = gocontext.Background()
+			parentCtx = tryResumeTrace(hexTraceID)
 		}
 		ctx, span := tracer.Start(parentCtx, name)
 		o.span = span
 		o.ctx.Put(_goctx, ctx)
 	}
 	return o
+}
+
+func tryResumeTrace(hexTraceID string) gocontext.Context {
+	ctx := gocontext.Background()
+	if hexTraceID == "" {
+		return ctx
+	}
+	// attempting to resume trace
+	traceID, err := trace.TraceIDFromHex(hexTraceID)
+	if err != nil {
+		fmt.Printf("Unable to resume trace from trace ID %v, will start new trace: %v\n", hexTraceID, err)
+		return ctx
+	}
+	var spanID [8]byte
+	_, err = rand.Read(spanID[:])
+	if err != nil {
+		fmt.Printf("Unable to generate span ID, will start new trace: %v\n", err)
+		return ctx
+	}
+	var spanContextConfig trace.SpanContextConfig
+	spanContextConfig.TraceID = traceID
+	spanContextConfig.SpanID = spanID
+	spanContext := trace.NewSpanContext(spanContextConfig)
+	return trace.ContextWithSpanContext(ctx, spanContext)
+}
+
+func (o *op) TraceID() string {
+	if o.span == nil {
+		return ""
+	}
+	return o.span.SpanContext().TraceID().String()
 }
 
 func (o *op) Go(fn func()) {
