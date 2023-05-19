@@ -141,7 +141,7 @@ func addOpenTelemetry(name, hexTraceID string, o *op) Op {
 		} else {
 			parentCtx = tryResumeTrace(hexTraceID)
 		}
-		ctx, span := tracer.Start(parentCtx, name)
+		ctx, span := t.Start(parentCtx, name)
 		o.span = span
 		o.ctx.Put(_goctx, ctx)
 	}

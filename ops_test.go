@@ -5,9 +5,10 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/getlantern/errors"
 	"github.com/getlantern/ops"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestSuccess(t *testing.T) {
