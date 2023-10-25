@@ -5,14 +5,16 @@ go 1.19
 require (
 	github.com/getlantern/context v0.0.0-20220418194847-3d5e7a086201
 	github.com/getlantern/errors v1.0.3
-	github.com/stretchr/testify v1.8.2
-	go.opentelemetry.io/otel v1.14.0
-	go.opentelemetry.io/otel/trace v1.14.0
+	github.com/stretchr/testify v1.8.4
+	go.opentelemetry.io/otel v1.19.0
+	go.opentelemetry.io/otel/trace v1.19.0
 )
+
+require go.opentelemetry.io/otel/metric v1.19.0 // indirect
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/go-logr/logr v1.2.3 // indirect
+	github.com/go-logr/logr v1.2.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/kr/pretty v0.1.0 // indirect
