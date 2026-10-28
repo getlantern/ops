@@ -7,10 +7,14 @@ require (
 	github.com/getlantern/errors v1.0.3
 	github.com/stretchr/testify v1.8.4
 	go.opentelemetry.io/otel v1.19.0
+	go.opentelemetry.io/otel/sdk v1.19.0
 	go.opentelemetry.io/otel/trace v1.19.0
 )
 
-require go.opentelemetry.io/otel/metric v1.19.0 // indirect
+require (
+	go.opentelemetry.io/otel/metric v1.19.0 // indirect
+	golang.org/x/sys v0.12.0 // indirect
+)
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect

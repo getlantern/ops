@@ -1,11 +1,15 @@
 package ops_test
 
 import (
+	"context"
 	gerrors "errors"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/getlantern/errors"
 	"github.com/getlantern/ops"
@@ -76,4 +80,28 @@ func doTestFailure(t *testing.T, cancel bool) {
 		assert.Contains(t, reportedFailure.Error(), "I failed")
 		assert.Equal(t, 5, reportedCtx["errorcontext"])
 	}
+}
+
+func TestSetParentContext(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	otel.SetTracerProvider(provider)
+	ops.EnableOpenTelemetry("test")
+	defer ops.SetParentContext(context.Background())
+
+	parentCtx, parent := provider.Tracer("test").Start(context.Background(), "parent")
+	ops.SetParentContext(parentCtx)
+	root := ops.Begin("root")
+	child := root.Begin("child")
+	child.End()
+	root.End()
+	parent.End()
+
+	byName := map[string]tracetest.SpanStub{}
+	for _, span := range exporter.GetSpans() {
+		byName[span.Name] = span
+	}
+	assert.Equal(t, byName["parent"].SpanContext.TraceID(), byName["root"].SpanContext.TraceID())
+	assert.Equal(t, byName["parent"].SpanContext.SpanID(), byName["root"].Parent.SpanID())
+	assert.Equal(t, byName["root"].SpanContext.SpanID(), byName["child"].Parent.SpanID())
 }

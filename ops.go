@@ -114,6 +114,14 @@ func (o *op) Begin(name string) Op {
 	)
 }
 
+// SetParentContext makes the span in ctx the parent of every Op begun
+// outside another Op, so a process doing work that a span elsewhere
+// started, such as a tester container, reports in that trace. Ops begun
+// from an Op keep that Op as their parent.
+func SetParentContext(ctx gocontext.Context) {
+	cm.PutGlobal(_goctx, ctx)
+}
+
 // Resume begins a new op within the scope of an existing trace
 func Resume(name, hexTraceID string) Op {
 	return addOpenTelemetry(
