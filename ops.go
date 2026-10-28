@@ -21,6 +21,9 @@ import (
 
 const (
 	_goctx = "_goctx"
+	// _parentctx is the global parent set by SetParentContext; it is kept
+	// apart from _goctx so an explicit trace to resume takes precedence.
+	_parentctx = "_parentctx"
 )
 
 var (
@@ -114,6 +117,30 @@ func (o *op) Begin(name string) Op {
 	)
 }
 
+// SetParentContext makes the span in ctx the parent of every Op begun
+// outside another Op without a trace of its own to resume, so a process
+// doing work that a span elsewhere started, such as a tester container,
+// reports in that trace. Ops begun from an Op keep that Op as their
+// parent, and Resume keeps the trace it is given. A ctx without a valid
+// span, or nil, clears the parent.
+func SetParentContext(ctx gocontext.Context) {
+	if ctx == nil || !trace.SpanContextFromContext(ctx).IsValid() {
+		cm.PutGlobal(_parentctx, nil)
+		return
+	}
+	cm.PutGlobal(_parentctx, ctx)
+}
+
+// parentContext is the global parent set by SetParentContext, or nil.
+func parentContext() gocontext.Context {
+	if v, found := cm.Get(_parentctx); found {
+		if ctx, ok := v.(gocontext.Context); ok {
+			return ctx
+		}
+	}
+	return nil
+}
+
 // Resume begins a new op within the scope of an existing trace
 func Resume(name, hexTraceID string) Op {
 	return addOpenTelemetry(
@@ -138,6 +165,8 @@ func addOpenTelemetry(name, hexTraceID string, o *op) Op {
 		_parentCtx, hasParentCtx := cm.Get(_goctx)
 		if hasParentCtx {
 			parentCtx, _ = _parentCtx.(gocontext.Context)
+		} else if parent := parentContext(); hexTraceID == "" && parent != nil {
+			parentCtx = parent
 		} else {
 			parentCtx = tryResumeTrace(hexTraceID)
 		}
@@ -179,8 +208,18 @@ func (o *op) TraceID() string {
 	return o.span.SpanContext().TraceID().String()
 }
 
+// Go runs fn on a goroutine of its own with this Op as the parent of the
+// Ops fn begins. The branched context the goroutine gets does not reach the
+// originating one on lookup, so the span's context is carried over.
 func (o *op) Go(fn func()) {
-	o.ctx.Go(fn)
+	goctx, found := o.ctx.Get(_goctx)
+	o.ctx.Go(func() {
+		if found {
+			c := cm.Enter().Put(_goctx, goctx)
+			defer c.Exit()
+		}
+		fn()
+	})
 }
 
 // Go mimics the method from context.Manager.
@@ -211,6 +250,7 @@ func (o *op) End() {
 		o.failureMx.RUnlock()
 		ctx := o.ctx.AsMap(failure, true)
 		delete(ctx, _goctx)
+		delete(ctx, _parentctx)
 		if failure != nil {
 			_, errorSet := ctx["error"]
 			if !errorSet {
@@ -287,6 +327,7 @@ func SetGlobalDynamic(key string, valueFN func() interface{}) {
 func AsMap(obj interface{}, includeGlobals bool) context.Map {
 	result := cm.AsMap(obj, includeGlobals)
 	delete(result, _goctx)
+	delete(result, _parentctx)
 	return result
 }
 
