@@ -21,6 +21,9 @@ import (
 
 const (
 	_goctx = "_goctx"
+	// _parentctx is the global parent set by SetParentContext; it is kept
+	// apart from _goctx so an explicit trace to resume takes precedence.
+	_parentctx = "_parentctx"
 )
 
 var (
@@ -115,11 +118,27 @@ func (o *op) Begin(name string) Op {
 }
 
 // SetParentContext makes the span in ctx the parent of every Op begun
-// outside another Op, so a process doing work that a span elsewhere
-// started, such as a tester container, reports in that trace. Ops begun
-// from an Op keep that Op as their parent.
+// outside another Op without a trace of its own to resume, so a process
+// doing work that a span elsewhere started, such as a tester container,
+// reports in that trace. Ops begun from an Op keep that Op as their
+// parent, and Resume keeps the trace it is given. A ctx without a valid
+// span, or nil, clears the parent.
 func SetParentContext(ctx gocontext.Context) {
-	cm.PutGlobal(_goctx, ctx)
+	if ctx == nil || !trace.SpanContextFromContext(ctx).IsValid() {
+		cm.PutGlobal(_parentctx, nil)
+		return
+	}
+	cm.PutGlobal(_parentctx, ctx)
+}
+
+// parentContext is the global parent set by SetParentContext, or nil.
+func parentContext() gocontext.Context {
+	if v, found := cm.Get(_parentctx); found {
+		if ctx, ok := v.(gocontext.Context); ok {
+			return ctx
+		}
+	}
+	return nil
 }
 
 // Resume begins a new op within the scope of an existing trace
@@ -146,6 +165,8 @@ func addOpenTelemetry(name, hexTraceID string, o *op) Op {
 		_parentCtx, hasParentCtx := cm.Get(_goctx)
 		if hasParentCtx {
 			parentCtx, _ = _parentCtx.(gocontext.Context)
+		} else if hexTraceID == "" && parentContext() != nil {
+			parentCtx = parentContext()
 		} else {
 			parentCtx = tryResumeTrace(hexTraceID)
 		}

@@ -84,7 +84,7 @@ func doTestFailure(t *testing.T, cancel bool) {
 
 func TestSetParentContext(t *testing.T) {
 	exporter := tracetest.NewInMemoryExporter()
-	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.AlwaysSample()), sdktrace.WithSyncer(exporter))
 	otel.SetTracerProvider(provider)
 	ops.EnableOpenTelemetry("test")
 	defer ops.SetParentContext(context.Background())
@@ -97,6 +97,17 @@ func TestSetParentContext(t *testing.T) {
 	root.End()
 	parent.End()
 
+	// An explicit trace to resume takes precedence over the parent.
+	other := "0af7651916cd43dd8448eb211c80319c"
+	resumed := ops.Resume("resumed", other)
+	resumed.End()
+	// Clearing the parent returns later ops to traces of their own.
+	ops.SetParentContext(context.Background())
+	alone := ops.Begin("alone")
+	alone.End()
+	cleared := ops.Resume("cleared", other)
+	cleared.End()
+
 	byName := map[string]tracetest.SpanStub{}
 	for _, span := range exporter.GetSpans() {
 		byName[span.Name] = span
@@ -104,4 +115,8 @@ func TestSetParentContext(t *testing.T) {
 	assert.Equal(t, byName["parent"].SpanContext.TraceID(), byName["root"].SpanContext.TraceID())
 	assert.Equal(t, byName["parent"].SpanContext.SpanID(), byName["root"].Parent.SpanID())
 	assert.Equal(t, byName["root"].SpanContext.SpanID(), byName["child"].Parent.SpanID())
+	assert.Equal(t, other, byName["resumed"].SpanContext.TraceID().String())
+	assert.NotEqual(t, byName["parent"].SpanContext.TraceID(), byName["alone"].SpanContext.TraceID())
+	assert.False(t, byName["alone"].Parent.IsValid())
+	assert.Equal(t, other, byName["cleared"].SpanContext.TraceID().String())
 }
